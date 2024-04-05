@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "packscriptreloader",
+  "version": "${version}",
+  "name": "Packscript Reloader",
+  "description": "auto compile and reload when dps files change",
+  "authors": [
+    "Slackow"
+  ],
+  "contact": {
+    "repo": "https://github.com/slackow/packscript_reloader"
+  },
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.slackow.packscriptreloader.PackscriptReloader"
+    ]
+  },
+  "mixins": [
+    "packscript_reloader.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "minecraft": "*"
+  }
+}
