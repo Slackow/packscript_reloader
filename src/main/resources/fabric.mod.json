@@ -10,7 +10,7 @@
   "contact": {
     "repo": "https://github.com/slackow/packscript_reloader"
   },
-  "license": "All-Rights-Reserved",
+  "license": "MIT",
   "environment": "*",
   "entrypoints": {
     "main": [
@@ -21,7 +21,7 @@
     "packscript_reloader.mixins.json"
   ],
   "depends": {
-    "fabricloader": ">=${loader_version}",
+    "fabricloader": ">=0.14.6",
     "minecraft": "*"
   }
 }
