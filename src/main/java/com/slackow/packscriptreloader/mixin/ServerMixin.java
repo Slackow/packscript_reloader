@@ -117,7 +117,7 @@ public abstract class ServerMixin {
                         return;
                     }
                     getCommands().getDispatcher().execute("reload", createCommandSourceStack());
-                    alert("reloaded");
+                    alert("Reloaded!");
                 } catch (IOException | InterruptedException | CommandSyntaxException e) {
                     e.printStackTrace(System.err);
                     error(e.getMessage());
