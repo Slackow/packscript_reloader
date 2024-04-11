@@ -1,10 +1,15 @@
 package com.slackow.packscriptreloader.mixin;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.Style;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.packs.repository.Pack;
 import net.minecraft.server.packs.repository.PackRepository;
@@ -21,15 +26,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.List;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.function.BooleanSupplier;
 
 import static java.lang.Integer.MAX_VALUE;
 import static java.nio.file.StandardOpenOption.CREATE_NEW;
+import static net.minecraft.network.chat.ClickEvent.Action.OPEN_URL;
+import static net.minecraft.network.chat.HoverEvent.Action.SHOW_TEXT;
 import static net.minecraft.world.level.storage.LevelResource.DATAPACK_DIR;
 import static net.minecraft.world.level.storage.LevelResource.ROOT;
 
@@ -37,6 +49,8 @@ import static net.minecraft.world.level.storage.LevelResource.ROOT;
 public abstract class ServerMixin {
     @Shadow
     private int tickCount;
+    @Unique
+    private boolean autoUpdate = true;
 
     @Shadow
     public abstract PackRepository getPackRepository();
@@ -135,7 +149,7 @@ public abstract class ServerMixin {
         Files.createDirectories(configDirectory);
         var configFile = configDirectory.resolve("packscript_reloader.txt");
         try {
-            Files.write(configFile, List.of("python=python3"), CREATE_NEW);
+            Files.write(configFile, List.of("python=python3", "auto-update=true"), CREATE_NEW);
         } catch (IOException ignored) {
         }
         try (var lines = Files.lines(configFile)) {
@@ -143,12 +157,14 @@ public abstract class ServerMixin {
                 if (line.startsWith("python=")) {
                     pythonLoc = line.substring("python=".length());
                 }
+                if (line.startsWith("auto-update=")) {
+                    autoUpdate = Boolean.parseBoolean(line.substring("auto-update=".length()));
+                }
             });
         } catch (IOException e) {
             error("There was an issue reading you config file");
             throw new IOException("Error reading config file", e);
         }
-
 
         devDirectory = getWorldPath(ROOT).resolve("dev");
         packscript = devDirectory.resolve("packscript.py");
@@ -165,7 +181,7 @@ public abstract class ServerMixin {
         if (!Files.exists(packscript)) {
             packscript = configDirectory.resolve("packscript.py");
         }
-        if (!Files.exists(packscript)) {
+        if (!Files.exists(packscript) && !updatePS("a")) {
             error("Packscript not detected, please add it to the root of the dev folder, (under the world) " +
                     "or the config folder (under .minecraft).");
             shouldLeave = true;
@@ -179,7 +195,69 @@ public abstract class ServerMixin {
             error(new String(new BufferedInputStream(packscriptProc.getErrorStream()).readAllBytes()));
             return;
         }
-        alert(new String(packscriptProc.getInputStream().readNBytes(200)).strip());
+        String version = new String(packscriptProc.getInputStream().readNBytes(200)).strip();
+        String packscriptVersion = version.substring(version.lastIndexOf(' ') + 1).strip();
+        if (autoUpdate) {
+            getLatestVersion().ifPresentOrElse(v -> {
+                if (!v.equals(packscriptVersion)) {
+                    if (updatePS("b")) {
+                        alert("PackScript " + v);
+                    }
+                } else alert(version);
+            }, () -> alert(version));
+        } else {
+            alert(version);
+        }
+    }
+
+    @Unique
+    private Optional<String> getLatestVersion() {
+        if (!autoUpdate) return Optional.empty();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://api.github.com/repos/Slackow/PackScript/releases/latest"))
+                .header("Accept", "application/vnd.github.v3+json")  // It's good practice to set the Accept header
+                .build();
+        try {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            JsonObject jsonObject = JsonParser.parseString(response.body()).getAsJsonObject();
+            return Optional.of(jsonObject.get("name").getAsString());
+
+        } catch (IOException | InterruptedException e) {
+            return Optional.empty();
+        }
+    }
+
+
+
+    @Unique
+    private boolean updatePS(String arg) {
+        if (!autoUpdate) return false;
+        if (!Files.exists(packscript)) {
+            packscript = devDirectory.resolve("packscript.py");
+        }
+        HttpClient client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.ALWAYS)
+                .build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://github.com/Slackow/PackScript/releases/latest/download/packscript.py"))
+                .build();
+        try {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) return false;
+            Files.writeString(packscript, response.body());
+            System.out.println("updated at " + arg);
+            alert(Component.literal("Updated PackScript! Changelog: ")
+                    .append(Component.literal("https://github.com/Slackow/PackScript/releases/latest")
+                            .withStyle(Style.EMPTY.withClickEvent(new ClickEvent(OPEN_URL,
+                                    "https://github.com/Slackow/PackScript/releases/latest"))
+                                    .withHoverEvent(new HoverEvent(SHOW_TEXT,
+                                            Component.literal("Open Changelog"))))));
+        } catch (IOException | InterruptedException e) {
+            error(e.getMessage());
+            return false;
+        }
+        return Files.exists(packscript);
     }
 
     @Unique
@@ -194,7 +272,12 @@ public abstract class ServerMixin {
 
     @Unique
     private void alert(String s) {
-        _msg(Component.literal("PS> " + s), true);
+        alert(Component.literal(s));
+    }
+
+    @Unique
+    private void alert(Component c) {
+        _msg(Component.literal("PS> ").append(c), true);
     }
     @Unique
     private final Queue<Component> backlog = new ArrayDeque<>();
