@@ -10,8 +10,9 @@
   "contact": {
     "repo": "https://github.com/slackow/packscript_reloader"
   },
+  "icon": "ps.png",
   "license": "MIT",
-  "environment": "*",
+  "environment": "server",
   "mixins": [
     "packscript_reloader.mixins.json"
   ],
